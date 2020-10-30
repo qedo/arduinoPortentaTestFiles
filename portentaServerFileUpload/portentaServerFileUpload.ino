@@ -1,23 +1,23 @@
 /*
   Portenta Server File Upload
- A simple web server that lets you send files attached as post request via the web.
- 
- This sketch will print the IP address of your WiFi module (once connected)
- to the Serial monitor. From there, you can open that address in a web browser
- 
- This example is written for a network using WPA encryption. For
- WEP or WPA, change the Wifi.begin() call accordingly.
+  A simple web server that lets you send files attached as post request via the web.
 
- This file is initially for testing Portenta H7 WiFi
- increase timeout if data is clipped
- edit WiFiClient.cpp
- in arduino::WiFiClient::receiveData()
- //_socket->set_blocking(false);
- _socket->set_timeout(20); or higher
- 
- created 30 Okt 2020
- by Andreas Donner
- */
+  This sketch will print the IP address of your WiFi module (once connected)
+  to the Serial monitor. From there, you can open that address in a web browser
+
+  This example is written for a network using WPA encryption. For
+  WEP or WPA, change the Wifi.begin() call accordingly.
+
+  This file is initially for testing Portenta H7 WiFi
+  increase timeout if data is clipped
+  edit WiFiClient.cpp
+  in arduino::WiFiClient::receiveData()
+  //_socket->set_blocking(false);
+  _socket->set_timeout(20); or higher
+
+  created 30 Okt 2020
+  by Andreas Donner
+*/
 
 #include "WiFi.h"
 #include "arduino_secrets.h"
@@ -51,8 +51,8 @@ void setup() {
 
     // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
     status = WiFi.begin(ssid, pass);
-    // wait 5 seconds for connection:
-    delay(5000);
+    // wait 10 seconds for connection:
+    delay(10000);
   }
 
   // start the web server on port 80
@@ -77,9 +77,8 @@ void loop() {
   if (client) {                             // if you get a client,
     Serial.println("new client");           // print a message out the serial port
     uint8_t i = 0;                          // empty lines counter
-    long b = 0;                             // char counter
-    bool firstLine = true;                  // first line of file data
     bool eof = false;                       // end of file
+    long b = 0;                             // byte counter
     String currentLine = "";                // make a String to hold incoming data from the client
 
     while (client.connected()) {            // loop while the client's connected
@@ -88,7 +87,6 @@ void loop() {
 
       while (client.available()) {          // if there's bytes to read from the client,
         char c = client.read();             // read a byte, then
-        if (i >= 2) b++;                    // increase counter
         Serial.write(c);                    // print it out the serial monitor
         if (c == '\n') {                    // if the byte is a newline character
 
@@ -96,32 +94,40 @@ void loop() {
           // that's the end of the client HTTP request:
           if (currentLine.length() == 0) {
             i++;
-          } else {    // if you got a newline, then clear currentLine:
-
             if (i >= 2) {   // data section
-              if (firstLine) {              // start counting bytes
-                firstLine = false;
-                b = 0;
-              }
-              if (currentLine.length() > 0) {
-                char postParameter[currentLine.length() + 1];
-                currentLine.toCharArray(postParameter, currentLine.length() + 1);
-
-                // last line is something like this: ------WebKitFormBoundaryC2Dj8Ed4FGmAhcgK--
-                if ( strncmp( postParameter, "------W", 7) == 0 ) { // end of file
-                  Serial.println("EOF");
-                  c = c - currentLine.length();
-                  eof = true;
-                } else {
-                  // TODO
-                  // save data to SD or do something useful
-                }
-              }
+              Serial.println("data:");
+              break;
             }
+          } else {    // if you got a newline, then clear currentLine:
             currentLine = "";
           }
         } else if (c != '\r') {  // if you got anything else but a carriage return character,
           currentLine += c;      // add it to the end of the currentLine
+        }
+      }
+
+      // second loop for the data part
+      char c[7];                              // buffer
+      char eofString[] = "------W";           // eof string
+
+      while (client.available()) {
+
+        for (uint8_t z = 0; z < 6; z++) {     // shift
+          c[z] = c[z + 1];
+        }
+        c[6] = client.read();                 // read a byte, then
+
+        if (strstr(c, eofString)) {           // check for eof
+          eof = true;
+          b = b - 8;
+          break;
+        } else {
+          b++;                                // increase byte counter
+          if (b > 7) {
+            Serial.write(c[0]);               // print it out the serial monitor
+            // TODO
+            // save data to SD or do something useful
+          }
         }
       }
 
@@ -136,7 +142,7 @@ void loop() {
         }
         else sendFileDiag(client, currentLine);
 
-        // break out of the while loop:
+        // break out of the while client.connected loop:
         break;
       }
       // increase if the two newline characters are missing
@@ -146,7 +152,7 @@ void loop() {
     // close the connection:
     client.stop();
     Serial.println();
-    Serial.println("client disonnected");
+    Serial.println("client disconnected");
   }
 }
 
