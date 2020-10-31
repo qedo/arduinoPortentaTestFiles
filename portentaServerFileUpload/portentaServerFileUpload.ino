@@ -71,87 +71,68 @@ void setup() {
 }
 
 void loop() {
-
-  WiFiClient client = server.available();   // listen for incoming clients
-
-  if (client) {                             // if you get a client,
-    Serial.println("new client");           // print a message out the serial port
-    uint8_t i = 0;                          // empty lines counter
-    bool eof = false;                       // end of file
-    long b = 0;                             // byte counter
-    String currentLine = "";                // make a String to hold incoming data from the client
-
-    while (client.connected()) {            // loop while the client's connected
-
-      Serial.println("client connected");   // print a message out the serial port
-
-      while (client.available()) {          // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        if (c == '\n') {                    // if the byte is a newline character
-
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request:
-          if (currentLine.length() == 0) {
-            i++;
-            if (i >= 2) {   // data section
-              Serial.println("data:");
-              break;
-            }
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-      }
-
-      // second loop for the data part
-      char c[7];                              // buffer
-      char eofString[] = "------W";           // eof string
-
-      while (client.available()) {
-
-        for (uint8_t z = 0; z < 6; z++) {     // shift
+  WiFiClient client = server.available();       // listen for incoming clients
+  if (client) {                                 // if you get a client,
+    Serial.println("new client");               // print a message out the serial port
+    long b = 0;                                 // byte counter
+    long i = 0;                                 // newline counter
+    byte j = 0;                                 // multi newline counter (max 3)
+    while (client.connected()) {                // loop while the client's connected
+      Serial.println("client connected\n");     // print a message out the serial port
+      char c[9];                                // buffer
+      char dataBeginString[] = "\r\n\r\n";      // data begin string
+      char eofString[] = "------W";             // eof string
+      while (client.available()) {              // if there's bytes to read from the client,
+        for (byte z = 0; z < 8; z++) {          // shift buffer
           c[z] = c[z + 1];
         }
-        c[6] = client.read();                 // read a byte, then
+        c[8] = client.read();                   // read a byte, then
+        //Serial.write(c[8]);                     // print it out the serial monitor
+        b++;                                    // increase byte counter
 
-        if (strstr(c, eofString)) {           // check for eof
-          eof = true;
-          b = b - 8;
-          break;
-        } else {
-          b++;                                // increase byte counter
-          if (b > 7) {
-            Serial.write(c[0]);               // print it out the serial monitor
-            // TODO
-            // save data to SD or do something useful
+        if (c[8] == '\n' || c[8] == '\r') {     // if the byte is a newline character
+          i++;                                  // increase the newline counter
+        } else {                                // else
+          i = 0;                                // reset the newline counter
+        }
+
+        if (j < 2 && i > 2) {                   // if the newline counter is > 2
+          j++;                                  // increase the multi newline counter (max 3)
+          i = 0;                                // reset the newline counter
+        }
+
+        if (j == 2) {
+          if (strstr(c, dataBeginString)) {     // check for data begin string
+            j = 3;                              // increase the multi newline counter (max 3)
+            b = -8;                             // clear buffer
+            Serial.print("data begin->");
+          }
+        }
+
+        if (j == 3) {                           // data
+          if (strstr(c, eofString)) {           // check for eof string
+            break;                              // end of file
+          } else {
+            if ( b >= 1) {
+              Serial.write(c[0]);               // print data
+              // TODO: save data to SD or do something useful
+            }
           }
         }
       }
-
-      // if it is a post request, there are bytes behind the two newline characters
-      if (i >= 1) {
-
-        // send a response, add the current post parameter line:
-        if (eof) {
-          char retStr[60];
-          sprintf(retStr, "transfer completed<br> %d bytes received", b);
-          sendFileDiag(client, retStr);
-        }
-        else sendFileDiag(client, currentLine);
-
-        // break out of the while client.connected loop:
-        break;
-      }
-      // increase if the two newline characters are missing
-      i++;
+      break;
     }
 
+    if (j == 3) {
+      char retStr[60];
+      sprintf(retStr, "%d bytes received", b - 1);
+      sendFileDiag(client, retStr);
+    } else {
+      sendFileDiag(client, "no data");
+    }
     // close the connection:
     client.stop();
-    Serial.println();
+    Serial.println("<-data end\n");
     Serial.println("client disconnected");
   }
 }
@@ -171,8 +152,7 @@ void printWiFiStatus() {
   Serial.println(ip);
 }
 
-void sendFileDiag(WiFiClient & client, String currentLine)
-{
+void sendFileDiag(WiFiClient & client, String currentLine) {
   IPAddress ip = WiFi.localIP();
   client.print(F("HTTP/1.1 200 OK\r\n"
                  "Content-Type: text/html\r\n"
@@ -189,11 +169,10 @@ void sendFileDiag(WiFiClient & client, String currentLine)
                  "<form enctype='multipart/form-data' action='http://"));
   client.print(ip);
   client.print(F("' method='POST'>\n"));
-  //client.print(F("<input type='hidden' name='MAX_FILE_SIZE' value='100000' />\n"));
-  client.print (F("<p>Choose a file to upload:</p><input name='uploadedfile' type='file' /><br />\n"));
-  client.print (F("<input type='submit' value='Upload File' />\n"));
+  client.print (F("<p>Choose a file to upload:</p><input name='uploadedfile' type='file'><br />\n"));
+  client.print (F("<input type='submit' value='Upload File'>\n"));
   client.print (F("</form>\n"));
-  client.print(F( "<br>\n<p>"));
+  client.print(F( "<br />\n<p>"));
   client.print (currentLine);
   client.print (F("</p></body>\n</html>"));
 }
